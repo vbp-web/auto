@@ -63,8 +63,12 @@ class DatabaseStore {
   async init() {
     if (this.initialized) return;
 
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+    } catch {
+      // In read-only serverless filesystems (e.g., Vercel Lambda), disk creation might be disallowed
     }
 
     if (fs.existsSync(DATA_FILE)) {
