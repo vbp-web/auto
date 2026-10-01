@@ -23,6 +23,21 @@ import {
   SEED_REVIEWS,
   createDemoUsers
 } from './seedData.ts';
+import { connectMongoDB, getMongoStatus } from './mongodb.ts';
+import {
+  UserModel,
+  ProductModel,
+  CarBrandModel,
+  CarModelModel,
+  CategoryModel,
+  AddressModel,
+  CartItemModel,
+  WishlistModel,
+  OrderModel,
+  ReviewModel,
+  CouponModel,
+  NotificationModel
+} from './models.ts';
 
 interface DatabaseSchema {
   users: User[];
@@ -59,10 +74,53 @@ class DatabaseStore {
   };
 
   private initialized = false;
+  private isMongoActive = false;
 
   async init() {
     if (this.initialized) return;
 
+    // 1. Check for MongoDB Atlas connection
+    const mongoUri = process.env.MONGODB_URI || process.env.MONGODB_URL;
+    if (mongoUri) {
+      try {
+        console.log('🔄 [Database] Attempting connection to MongoDB Atlas...');
+        const conn = await connectMongoDB();
+        if (conn) {
+          this.isMongoActive = true;
+          console.log('✅ [Database] Successfully connected to MongoDB Atlas cluster.');
+
+          // Check if database needs initial seeding
+          const userCount = await UserModel.countDocuments();
+          const productCount = await ProductModel.countDocuments();
+
+          if (userCount === 0 || productCount === 0) {
+            console.log('🌱 [MongoDB Atlas] Empty database detected. Auto-seeding catalog & demo data into Atlas...');
+            await this.seedMongoAtlas();
+            console.log('✨ [MongoDB Atlas] Initial seeding completed successfully.');
+          }
+
+          // Hydrate memory cache from MongoDB Atlas
+          await this.syncFromMongoAtlas();
+          console.log(`📦 [MongoDB Atlas] Synced ${this.data.products.length} products, ${this.data.users.length} users, ${this.data.orders.length} orders into active memory.`);
+          this.initialized = true;
+          return;
+        }
+      } catch (err: any) {
+        console.warn('⚠️ [MongoDB Atlas] Could not establish initial connection:', err.message);
+        console.warn('⚠️ [Database] Falling back to local JSON storage.');
+        this.isMongoActive = false;
+      }
+    } else {
+      console.log('ℹ️ [Database] MONGODB_URI not configured. Operating in local JSON storage mode.');
+      console.log('ℹ️ [Database] To connect to MongoDB Atlas, add MONGODB_URI to your .env or Vercel Environment Variables.');
+    }
+
+    // 2. Local JSON File fallback
+    await this.initLocalFile();
+    this.initialized = true;
+  }
+
+  private async initLocalFile() {
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -75,7 +133,6 @@ class DatabaseStore {
       try {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         this.data = JSON.parse(raw);
-        // Ensure all keys exist
         if (!this.data.users) this.data.users = [];
         if (!this.data.products) this.data.products = [];
         if (!this.data.carBrands) this.data.carBrands = [];
@@ -88,17 +145,194 @@ class DatabaseStore {
         if (!this.data.reviews) this.data.reviews = [];
         if (!this.data.coupons) this.data.coupons = [];
         if (!this.data.notifications) this.data.notifications = [];
-        this.initialized = true;
         return;
       } catch (err) {
         console.error('Failed reading existing database file, reseeding:', err);
       }
     }
 
-    // Seed defaults
+    // Seed defaults in memory and file
     await this.seedDefaults();
     this.save();
-    this.initialized = true;
+  }
+
+  private async seedMongoAtlas() {
+    const demoUsers = await createDemoUsers();
+
+    // Clean any empty/half-populated collections
+    await Promise.allSettled([
+      UserModel.deleteMany({}),
+      ProductModel.deleteMany({}),
+      CarBrandModel.deleteMany({}),
+      CarModelModel.deleteMany({}),
+      CategoryModel.deleteMany({}),
+      CouponModel.deleteMany({}),
+      ReviewModel.deleteMany({}),
+      AddressModel.deleteMany({}),
+      OrderModel.deleteMany({})
+    ]);
+
+    await UserModel.insertMany(demoUsers);
+    await ProductModel.insertMany(SEED_PRODUCTS);
+    await CarBrandModel.insertMany(SEED_BRANDS);
+    await CarModelModel.insertMany(SEED_MODELS);
+    await CategoryModel.insertMany(SEED_CATEGORIES);
+    await CouponModel.insertMany(SEED_COUPONS);
+    await ReviewModel.insertMany(SEED_REVIEWS);
+
+    const demoAddr: Address = {
+      id: 'addr_demo_1',
+      userId: 'user_customer_demo',
+      name: 'Rohan Sharma',
+      phone: '+91 91234 56789',
+      addressLine1: 'Flat 402, Highline Residency, Outer Ring Road',
+      apartment: 'Bellandur',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pincode: '560103',
+      country: 'India',
+      isDefault: true
+    };
+    await AddressModel.create(demoAddr);
+
+    const demoOrder: Order = {
+      id: 'ord_demo_9821',
+      orderNumber: 'APX-2026-9821',
+      userId: 'user_customer_demo',
+      customerName: 'Rohan Sharma',
+      customerEmail: 'customer@example.com',
+      customerPhone: '+91 91234 56789',
+      items: [
+        {
+          productId: 'prod_creta_7d_mats',
+          name: 'AutoApex 7D Laser-Cut All-Weather Floor Mats for Hyundai Creta',
+          sku: 'APX-FM-CRT-7D-01',
+          image: '/src/assets/images/product_floor_mats_1790681468276.jpg',
+          price: 4999,
+          quantity: 1,
+          vehicleCompatibility: 'Hyundai Creta 2024'
+        }
+      ],
+      shippingAddress: demoAddr,
+      subtotal: 4999,
+      discount: 499.9,
+      couponCode: 'CAR10',
+      tax: 809.84,
+      shipping: 0,
+      total: 5308.94,
+      payment: {
+        method: 'Razorpay UPI',
+        razorpayOrderId: 'order_test_9821',
+        razorpayPaymentId: 'pay_test_9821_success',
+        status: 'PAID',
+        paidAt: new Date(Date.now() - 3600 * 1000 * 24 * 2).toISOString()
+      },
+      orderStatus: 'SHIPPED',
+      trackingNumber: 'DELHIVERY_894726154',
+      carrier: 'Delhivery Automotive Express',
+      statusTimeline: [
+        {
+          status: 'PLACED',
+          title: 'Order Placed',
+          description: 'Payment authorized successfully via Razorpay UPI.',
+          timestamp: new Date(Date.now() - 3600 * 1000 * 24 * 2).toISOString(),
+          completed: true
+        },
+        {
+          status: 'CONFIRMED',
+          title: 'Order Confirmed',
+          description: 'Verified vehicle compatibility with Hyundai Creta 2024.',
+          timestamp: new Date(Date.now() - 3600 * 1000 * 24 * 1.8).toISOString(),
+          completed: true
+        },
+        {
+          status: 'PROCESSING',
+          title: 'Processing & Quality Check',
+          description: 'Mats precision scanned and passed quality inspection.',
+          timestamp: new Date(Date.now() - 3600 * 1000 * 24 * 1.5).toISOString(),
+          completed: true
+        },
+        {
+          status: 'PACKED',
+          title: 'Packed in Secure Enclosure',
+          description: 'Item packaged in waterproof protective crate.',
+          timestamp: new Date(Date.now() - 3600 * 1000 * 24 * 1).toISOString(),
+          completed: true
+        },
+        {
+          status: 'SHIPPED',
+          title: 'Dispatched with Carrier',
+          description: 'Dispatched with Delhivery Tracking #DELHIVERY_894726154.',
+          timestamp: new Date(Date.now() - 3600 * 1000 * 12).toISOString(),
+          completed: true
+        },
+        {
+          status: 'OUT_FOR_DELIVERY',
+          title: 'Out for Delivery',
+          description: 'Courier agent will deliver between 10:00 AM - 2:00 PM.',
+          timestamp: '',
+          completed: false
+        },
+        {
+          status: 'DELIVERED',
+          title: 'Delivered',
+          description: 'Package delivered at shipping address.',
+          timestamp: '',
+          completed: false
+        }
+      ],
+      createdAt: new Date(Date.now() - 3600 * 1000 * 24 * 2).toISOString(),
+      updatedAt: new Date(Date.now() - 3600 * 1000 * 12).toISOString()
+    };
+    await OrderModel.create(demoOrder);
+
+    await WishlistModel.findOneAndUpdate(
+      { userId: 'user_customer_demo' },
+      { userId: 'user_customer_demo', productIds: ['prod_4k_dual_dashcam_pro', 'prod_nappa_leather_seat_creta'] },
+      { upsert: true }
+    );
+  }
+
+  private async syncFromMongoAtlas() {
+    const [users, products, carBrands, carModels, categories, addresses, orders, reviews, coupons, notifications, cartItems, wishlists] =
+      await Promise.all([
+        UserModel.find().lean(),
+        ProductModel.find().lean(),
+        CarBrandModel.find().lean(),
+        CarModelModel.find().lean(),
+        CategoryModel.find().lean(),
+        AddressModel.find().lean(),
+        OrderModel.find().lean(),
+        ReviewModel.find().lean(),
+        CouponModel.find().lean(),
+        NotificationModel.find().lean(),
+        CartItemModel.find().lean(),
+        WishlistModel.find().lean()
+      ]);
+
+    this.data.users = (users as unknown as User[]) || [];
+    this.data.products = (products as unknown as Product[]) || [];
+    this.data.carBrands = (carBrands as unknown as CarBrand[]) || [];
+    this.data.carModels = (carModels as unknown as CarModel[]) || [];
+    this.data.categories = (categories as unknown as Category[]) || [];
+    this.data.addresses = (addresses as unknown as Address[]) || [];
+    this.data.orders = (orders as unknown as Order[]) || [];
+    this.data.reviews = (reviews as unknown as Review[]) || [];
+    this.data.coupons = (coupons as unknown as Coupon[]) || [];
+    this.data.notifications = (notifications as unknown as Notification[]) || [];
+
+    // Group carts by userId
+    this.data.carts = {};
+    for (const item of (cartItems as unknown as CartItem[]) || []) {
+      if (!this.data.carts[item.userId]) this.data.carts[item.userId] = [];
+      this.data.carts[item.userId].push(item);
+    }
+
+    // Group wishlists by userId
+    this.data.wishlists = {};
+    for (const w of (wishlists as unknown as Array<{ userId: string; productIds: string[] }>) || []) {
+      this.data.wishlists[w.userId] = w.productIds || [];
+    }
   }
 
   private async seedDefaults() {
@@ -111,7 +345,6 @@ class DatabaseStore {
     this.data.coupons = SEED_COUPONS;
     this.data.reviews = SEED_REVIEWS;
 
-    // Default address for customer
     const demoAddr: Address = {
       id: 'addr_demo_1',
       userId: 'user_customer_demo',
@@ -127,7 +360,6 @@ class DatabaseStore {
     };
     this.data.addresses = [demoAddr];
 
-    // Default demo order
     const demoOrder: Order = {
       id: 'ord_demo_9821',
       orderNumber: 'APX-2026-9821',
@@ -225,9 +457,34 @@ class DatabaseStore {
   save() {
     try {
       fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('Failed saving database to disk:', err);
+    } catch {
+      // In read-only serverless filesystems or missing data dir, continue safely
     }
+  }
+
+  private persistAsync(operation: string, fn: () => Promise<unknown>) {
+    if (!this.isMongoActive) return;
+    fn().catch(err => {
+      console.error(`⚠️ [MongoDB Atlas] Async persistence error in ${operation}:`, err.message);
+    });
+  }
+
+  // --- Database Mode & Status ---
+  getDbStatus() {
+    return {
+      mode: this.isMongoActive ? 'MongoDB Atlas' : 'Local JSON Fallback',
+      isMongoActive: this.isMongoActive,
+      mongo: getMongoStatus(),
+      counts: {
+        users: this.data.users.length,
+        products: this.data.products.length,
+        categories: this.data.categories.length,
+        carBrands: this.data.carBrands.length,
+        orders: this.data.orders.length,
+        reviews: this.data.reviews.length,
+        coupons: this.data.coupons.length
+      }
+    };
   }
 
   // --- User Operations ---
@@ -242,6 +499,7 @@ class DatabaseStore {
   createUser(user: User): User {
     this.data.users.push(user);
     this.save();
+    this.persistAsync('createUser', () => UserModel.create(user));
     return user;
   }
 
@@ -250,6 +508,7 @@ class DatabaseStore {
     if (idx === -1) return undefined;
     this.data.users[idx] = { ...this.data.users[idx], ...updates };
     this.save();
+    this.persistAsync('updateUser', () => UserModel.findOneAndUpdate({ id }, { $set: updates }));
     return this.data.users[idx];
   }
 
@@ -264,13 +523,16 @@ class DatabaseStore {
 
   addAddress(address: Address): Address {
     if (address.isDefault) {
-      // Unset previous defaults
       this.data.addresses.forEach(a => {
         if (a.userId === address.userId) a.isDefault = false;
       });
+      this.persistAsync('unsetAddressDefaults', () =>
+        AddressModel.updateMany({ userId: address.userId }, { $set: { isDefault: false } })
+      );
     }
     this.data.addresses.push(address);
     this.save();
+    this.persistAsync('addAddress', () => AddressModel.create(address));
     return address;
   }
 
@@ -281,9 +543,15 @@ class DatabaseStore {
       this.data.addresses.forEach(a => {
         if (a.userId === userId) a.isDefault = false;
       });
+      this.persistAsync('unsetAddressDefaults', () =>
+        AddressModel.updateMany({ userId }, { $set: { isDefault: false } })
+      );
     }
     this.data.addresses[idx] = { ...this.data.addresses[idx], ...updates };
     this.save();
+    this.persistAsync('updateAddress', () =>
+      AddressModel.findOneAndUpdate({ id, userId }, { $set: updates })
+    );
     return this.data.addresses[idx];
   }
 
@@ -291,7 +559,10 @@ class DatabaseStore {
     const initialLen = this.data.addresses.length;
     this.data.addresses = this.data.addresses.filter(a => !(a.id === id && a.userId === userId));
     const deleted = this.data.addresses.length < initialLen;
-    if (deleted) this.save();
+    if (deleted) {
+      this.save();
+      this.persistAsync('deleteAddress', () => AddressModel.deleteOne({ id, userId }));
+    }
     return deleted;
   }
 
@@ -434,6 +705,7 @@ class DatabaseStore {
   createProduct(product: Product): Product {
     this.data.products.push(product);
     this.save();
+    this.persistAsync('createProduct', () => ProductModel.create(product));
     return product;
   }
 
@@ -442,6 +714,7 @@ class DatabaseStore {
     if (idx === -1) return undefined;
     this.data.products[idx] = { ...this.data.products[idx], ...updates, updatedAt: new Date().toISOString() };
     this.save();
+    this.persistAsync('updateProduct', () => ProductModel.findOneAndUpdate({ id }, { $set: updates }));
     return this.data.products[idx];
   }
 
@@ -449,7 +722,10 @@ class DatabaseStore {
     const len = this.data.products.length;
     this.data.products = this.data.products.filter(p => p.id !== id);
     const deleted = this.data.products.length < len;
-    if (deleted) this.save();
+    if (deleted) {
+      this.save();
+      this.persistAsync('deleteProduct', () => ProductModel.deleteOne({ id }));
+    }
     return deleted;
   }
 
@@ -505,6 +781,7 @@ class DatabaseStore {
   createCategory(category: Category): Category {
     this.data.categories.push(category);
     this.save();
+    this.persistAsync('createCategory', () => CategoryModel.create(category));
     return category;
   }
 
@@ -513,6 +790,7 @@ class DatabaseStore {
     if (idx === -1) return undefined;
     this.data.categories[idx] = { ...this.data.categories[idx], ...updates };
     this.save();
+    this.persistAsync('updateCategory', () => CategoryModel.findOneAndUpdate({ id }, { $set: updates }));
     return this.data.categories[idx];
   }
 
@@ -520,7 +798,10 @@ class DatabaseStore {
     const len = this.data.categories.length;
     this.data.categories = this.data.categories.filter(c => c.id !== id);
     const deleted = this.data.categories.length < len;
-    if (deleted) this.save();
+    if (deleted) {
+      this.save();
+      this.persistAsync('deleteCategory', () => CategoryModel.deleteOne({ id }));
+    }
     return deleted;
   }
 
@@ -545,15 +826,21 @@ class DatabaseStore {
       if (item.selectedVehicle) {
         cart[existingIdx].selectedVehicle = item.selectedVehicle;
       }
+      const updatedItem = cart[existingIdx];
+      this.persistAsync('updateCartItem', () =>
+        CartItemModel.findOneAndUpdate({ id: updatedItem.id }, { $set: updatedItem }, { upsert: true })
+      );
     } else {
-      cart.push({
+      const newItem: CartItem = {
         id: 'cart_' + crypto.randomUUID().slice(0, 8),
         userId,
         productId: item.productId,
         quantity: item.quantity,
         selectedVehicle: item.selectedVehicle,
         addedAt: new Date().toISOString()
-      });
+      };
+      cart.push(newItem);
+      this.persistAsync('addCartItem', () => CartItemModel.create(newItem));
     }
     this.save();
     return cart;
@@ -565,8 +852,14 @@ class DatabaseStore {
     if (item) {
       if (quantity <= 0) {
         this.data.carts[userId] = cart.filter(c => c.id !== cartItemId && c.productId !== cartItemId);
+        this.persistAsync('removeCartItem', () =>
+          CartItemModel.deleteOne({ id: item.id })
+        );
       } else {
         item.quantity = quantity;
+        this.persistAsync('updateCartItemQty', () =>
+          CartItemModel.findOneAndUpdate({ id: item.id }, { $set: { quantity } })
+        );
       }
       this.save();
     }
@@ -575,6 +868,10 @@ class DatabaseStore {
 
   removeFromCart(userId: string, cartItemId: string): CartItem[] {
     if (this.data.carts[userId]) {
+      const target = this.data.carts[userId].find(c => c.id === cartItemId || c.productId === cartItemId);
+      if (target) {
+        this.persistAsync('removeCartItem', () => CartItemModel.deleteOne({ id: target.id }));
+      }
       this.data.carts[userId] = this.data.carts[userId].filter(c => c.id !== cartItemId && c.productId !== cartItemId);
       this.save();
     }
@@ -584,6 +881,7 @@ class DatabaseStore {
   clearCart(userId: string): void {
     this.data.carts[userId] = [];
     this.save();
+    this.persistAsync('clearCart', () => CartItemModel.deleteMany({ userId }));
   }
 
   // --- Wishlist Operations ---
@@ -607,6 +905,9 @@ class DatabaseStore {
       inWishlist = true;
     }
     this.save();
+    this.persistAsync('toggleWishlist', () =>
+      WishlistModel.findOneAndUpdate({ userId }, { productIds: list }, { upsert: true })
+    );
     return { inWishlist, wishlist: list };
   }
 
@@ -743,17 +1044,29 @@ class DatabaseStore {
         } else if (prod.stock <= prod.lowStockThreshold) {
           prod.stockStatus = 'LOW_STOCK';
         }
+        this.persistAsync('updateProductStock', () =>
+          ProductModel.findOneAndUpdate(
+            { id: item.productId },
+            { $set: { stock: prod.stock, stockStatus: prod.stockStatus } }
+          )
+        );
       }
     }
 
     // Increment coupon used count if used
     if (order.couponCode) {
       const coup = this.data.coupons.find(c => c.code === order.couponCode);
-      if (coup) coup.usedCount += 1;
+      if (coup) {
+        coup.usedCount += 1;
+        this.persistAsync('incrementCouponUsage', () =>
+          CouponModel.findOneAndUpdate({ code: coup.code }, { $inc: { usedCount: 1 } })
+        );
+      }
     }
 
     this.data.orders.unshift(order);
     this.save();
+    this.persistAsync('createOrder', () => OrderModel.create(order));
     return order;
   }
 
@@ -776,6 +1089,18 @@ class DatabaseStore {
     }
 
     this.save();
+    this.persistAsync('updateOrderStatus', () =>
+      OrderModel.findOneAndUpdate(
+        { id: order.id },
+        {
+          $set: {
+            orderStatus: order.orderStatus,
+            updatedAt: order.updatedAt,
+            statusTimeline: order.statusTimeline
+          }
+        }
+      )
+    );
     return order;
   }
 
@@ -826,6 +1151,18 @@ class DatabaseStore {
     });
 
     this.save();
+    this.persistAsync('advanceOrderTracking', () =>
+      OrderModel.findOneAndUpdate(
+        { id: order.id },
+        {
+          $set: {
+            orderStatus: order.orderStatus,
+            updatedAt: order.updatedAt,
+            statusTimeline: order.statusTimeline
+          }
+        }
+      )
+    );
     return order;
   }
 
@@ -847,6 +1184,18 @@ class DatabaseStore {
     });
 
     this.save();
+    this.persistAsync('resetOrderTracking', () =>
+      OrderModel.findOneAndUpdate(
+        { id: order.id },
+        {
+          $set: {
+            orderStatus: order.orderStatus,
+            updatedAt: order.updatedAt,
+            statusTimeline: order.statusTimeline
+          }
+        }
+      )
+    );
     return order;
   }
 
@@ -872,9 +1221,16 @@ class DatabaseStore {
     if (prod) {
       prod.rating = parseFloat(avgRating.toFixed(1));
       prod.reviewCount = prodReviews.length;
+      this.persistAsync('updateProductRating', () =>
+        ProductModel.findOneAndUpdate(
+          { id: prod.id },
+          { $set: { rating: prod.rating, reviewCount: prod.reviewCount } }
+        )
+      );
     }
 
     this.save();
+    this.persistAsync('addReview', () => ReviewModel.create(rev));
     return rev;
   }
 
@@ -887,6 +1243,9 @@ class DatabaseStore {
     if (!rev) return undefined;
     rev.status = status;
     this.save();
+    this.persistAsync('updateReviewStatus', () =>
+      ReviewModel.findOneAndUpdate({ id }, { $set: { status } })
+    );
     return rev;
   }
 
@@ -930,7 +1289,6 @@ class DatabaseStore {
       .sort((a, b) => b.unitsSold - a.unitsSold)
       .slice(0, 5);
 
-    // Mock 7-day revenue trend for charts
     const revenueTimeline = [
       { date: 'Sep 23', revenue: 14500, orders: 3 },
       { date: 'Sep 24', revenue: 22800, orders: 5 },
@@ -951,7 +1309,8 @@ class DatabaseStore {
       categorySales,
       topSelling,
       revenueTimeline,
-      recentOrders: this.data.orders.slice(0, 8)
+      recentOrders: this.data.orders.slice(0, 8),
+      dbStatus: this.getDbStatus()
     };
   }
 }

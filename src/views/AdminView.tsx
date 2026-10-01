@@ -14,7 +14,12 @@ import {
   Edit2,
   CheckCircle2,
   X,
-  Search
+  Search,
+  Database,
+  Server,
+  Info,
+  Check,
+  Copy
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { api } from '../services/api.ts';
@@ -53,6 +58,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onBackToStore }) => {
   const [coupDiscount, setCoupDiscount] = useState(15);
   const [coupMinOrder, setCoupMinOrder] = useState(2000);
   const [coupMaxDiscount, setCoupMaxDiscount] = useState(800);
+
+  // MongoDB Atlas Info Modal
+  const [showMongoModal, setShowMongoModal] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   useEffect(() => {
     async function loadAdminData() {
@@ -287,6 +296,80 @@ export const AdminView: React.FC<AdminViewProps> = ({ onBackToStore }) => {
                   <span className="text-[10px] text-zinc-500">{item.date}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Database Architecture & MongoDB Atlas Status */}
+          <div className="p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-2xl shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 flex items-center justify-center">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-zinc-950 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    Database Engine: {analytics.dbStatus?.mode || 'MongoDB Atlas'}
+                  </h3>
+                  <p className="text-[11px] text-zinc-500">
+                    {analytics.dbStatus?.isMongoActive
+                      ? `Connected to MongoDB Atlas cluster (${analytics.dbStatus?.mongo?.databaseName || 'autoapex'})`
+                      : 'Hybrid fallback active. Set MONGODB_URI to connect to your MongoDB Atlas cluster.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold ${
+                    analytics.dbStatus?.isMongoActive
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300'
+                      : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      analytics.dbStatus?.isMongoActive ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'
+                    }`}
+                  />
+                  {analytics.dbStatus?.isMongoActive ? 'MongoDB Atlas Live' : 'Local File Store'}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMongoModal(true)}
+                  className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-800 dark:hover:bg-zinc-700 text-[11px] font-semibold rounded-lg shadow-sm cursor-pointer flex items-center gap-1"
+                >
+                  <Server className="w-3 h-3" />
+                  <span>Atlas Setup Guide</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-850 rounded-xl">
+                <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Products Synced</span>
+                <span className="text-base font-bold text-zinc-900 dark:text-white mt-0.5 block">
+                  {analytics.dbStatus?.counts?.products ?? products.length}
+                </span>
+              </div>
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-850 rounded-xl">
+                <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Users Registered</span>
+                <span className="text-base font-bold text-zinc-900 dark:text-white mt-0.5 block">
+                  {analytics.dbStatus?.counts?.users ?? analytics.totalCustomers}
+                </span>
+              </div>
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-850 rounded-xl">
+                <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Orders Stored</span>
+                <span className="text-base font-bold text-zinc-900 dark:text-white mt-0.5 block">
+                  {analytics.dbStatus?.counts?.orders ?? orders.length}
+                </span>
+              </div>
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-850 rounded-xl">
+                <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Driver / ODM</span>
+                <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 block">
+                  Mongoose 8
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -683,6 +766,143 @@ export const AdminView: React.FC<AdminViewProps> = ({ onBackToStore }) => {
               Activate Coupon
             </button>
           </form>
+        </div>
+      )}
+
+      {/* MongoDB Atlas Setup Modal */}
+      {showMongoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div onClick={() => setShowMongoModal(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 space-y-4 text-xs shadow-2xl transition-colors max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 flex items-center justify-center">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-950 dark:text-white uppercase tracking-wider">
+                    MongoDB Atlas Configuration
+                  </h3>
+                  <span className="text-[10px] text-zinc-500">Cloud Database Integration</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMongoModal(false)}
+                className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Current Status Box */}
+            <div className="p-3.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-xl border border-zinc-200 dark:border-zinc-850 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-zinc-700 dark:text-zinc-300">Connection Status:</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    analytics?.dbStatus?.isMongoActive
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      analytics?.dbStatus?.isMongoActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                    }`}
+                  />
+                  {analytics?.dbStatus?.isMongoActive ? 'Connected to Atlas' : 'Local Fallback (Ready for Atlas)'}
+                </span>
+              </div>
+              {analytics?.dbStatus?.mongo?.host && (
+                <p className="text-[11px] text-zinc-500 font-mono">
+                  Host: {analytics.dbStatus.mongo.host}
+                </p>
+              )}
+            </div>
+
+            {/* Step-by-Step Instructions */}
+            <div className="space-y-3">
+              <h4 className="font-bold text-zinc-900 dark:text-white uppercase tracking-wider text-[11px]">
+                How to Connect your Atlas Cluster
+              </h4>
+
+              <div className="space-y-2.5 text-zinc-600 dark:text-zinc-400 leading-relaxed text-[11px]">
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400 flex items-center justify-center font-bold text-[10px] shrink-0">
+                    1
+                  </span>
+                  <div>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-200">Create a Free Atlas Cluster:</span>
+                    <p>Go to <a href="https://www.mongodb.com/atlas" target="_blank" rel="noreferrer" className="text-red-600 hover:underline">mongodb.com/atlas</a> and create an M0 (Free Forever) cluster.</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400 flex items-center justify-center font-bold text-[10px] shrink-0">
+                    2
+                  </span>
+                  <div>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-200">Allow Network IP:</span>
+                    <p>In Atlas under <strong>Network Access</strong>, click <strong>Add IP Address</strong> and choose <strong>Allow Access from Anywhere (0.0.0.0/0)</strong> so Vercel functions can connect.</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400 flex items-center justify-center font-bold text-[10px] shrink-0">
+                    3
+                  </span>
+                  <div>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-200">Create Database User:</span>
+                    <p>In <strong>Database Access</strong>, add a user with read/write access (e.g., username: <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded">admin</code>).</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400 flex items-center justify-center font-bold text-[10px] shrink-0">
+                    4
+                  </span>
+                  <div>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-200">Set Environment Variable:</span>
+                    <p>In your Vercel Project Settings &rarr; <strong>Environment Variables</strong> (or local <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded">.env</code>), add:</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Code Snippet Box */}
+              <div className="relative p-3 bg-zinc-900 text-zinc-100 rounded-xl font-mono text-[10px] break-all border border-zinc-800">
+                <span className="text-zinc-400 block mb-1"># Key Name: MONGODB_URI</span>
+                <span className="text-emerald-400">
+                  mongodb+srv://&lt;user&gt;:&lt;password&gt;@cluster0.abcde.mongodb.net/autoapex?retryWrites=true&w=majority
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText('MONGODB_URI="mongodb+srv://<username>:<password>@cluster0.mongodb.net/autoapex?retryWrites=true&w=majority"');
+                    setCopiedKey(true);
+                    setTimeout(() => setCopiedKey(false), 2000);
+                  }}
+                  className="mt-2.5 flex items-center gap-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2.5 py-1 rounded cursor-pointer transition-colors"
+                >
+                  {copiedKey ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey ? 'Copied to Clipboard!' : 'Copy Template Key'}</span>
+                </button>
+              </div>
+
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 rounded-xl flex items-start gap-2 text-emerald-800 dark:text-emerald-300 text-[11px]">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <p>
+                  <strong>Automatic Seeding:</strong> On your first launch with MongoDB Atlas, AutoApex automatically creates all collections and seeds 20+ vehicle catalog parts, demo users, coupons, and car model fitment rules!
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowMongoModal(false)}
+              className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white font-semibold rounded-lg text-xs cursor-pointer shadow-sm"
+            >
+              Got it, Close
+            </button>
+          </div>
         </div>
       )}
     </div>

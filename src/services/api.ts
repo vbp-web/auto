@@ -258,5 +258,11 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ status })
       })
+  },
+
+  // Database Status (MongoDB Atlas)
+  db: {
+    getStatus: () => request<any>('/db/status')
   }
 };
+

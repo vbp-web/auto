@@ -821,4 +821,19 @@ router.put('/admin/reviews/:id/status', requireAdmin, (req, res: Response) => {
   return res.json({ success: true, data: updated });
 });
 
+// ==========================================
+// 14. DATABASE CONNECTIVITY STATUS (MONGODB ATLAS)
+// ==========================================
+router.get('/db/status', (_req, res: Response) => {
+  const status = db.getDbStatus();
+  return res.json({
+    success: true,
+    data: status,
+    instructions: status.isMongoActive
+      ? 'MongoDB Atlas is active and synchronizing data.'
+      : 'To connect to MongoDB Atlas, add your MONGODB_URI connection string to your environment variables (.env locally, or Vercel Project Settings in production).'
+  });
+});
+
 export default router;
+

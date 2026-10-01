@@ -38,12 +38,47 @@ A production-grade, full-stack automotive e-commerce platform built with React 1
    - **Framework Preset**: Vite
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
-5. **Environment Variables** (Optional):
-   - Add `JWT_SECRET` (e.g., any secure random string)
-   - Add any Gemini / API keys if needed
+5. **Environment Variables**:
+   - `MONGODB_URI`: Your MongoDB Atlas connection string (see Step 3 below).
+   - `JWT_SECRET`: Any secure random string (e.g. `apex_prod_jwt_secret_2026`).
 6. Click **Deploy**.
 
 Your app and serverless API endpoints will be live with full routing and SSL!
+
+---
+
+### Step 3: Connect MongoDB Atlas (Database)
+
+AutoApex includes full, native support for **MongoDB Atlas** with Mongoose 8. It also has a built-in hybrid mode that runs a resilient local store until your MongoDB Atlas cluster is connected.
+
+#### Setting up MongoDB Atlas:
+1. **Create Free Database**:
+   - Visit [mongodb.com/atlas](https://www.mongodb.com/atlas) and register or sign in.
+   - Deploy a free **M0 (Shared Cluster)** (e.g., AWS / Mumbai or Frankfurt region).
+2. **Configure Network Access**:
+   - In Atlas left sidebar, go to **Network Access** &rarr; **Add IP Address**.
+   - Select **Allow Access from Anywhere** (`0.0.0.0/0`) so Vercel Serverless Functions can connect without IP restrictions.
+3. **Create Database User**:
+   - In Atlas left sidebar, go to **Database Access** &rarr; **Add New Database User**.
+   - Set Authentication Method to **Password** (e.g., username `admin`, and create a secure password).
+   - Assign **Read and write to any database** privileges.
+4. **Obtain Connection String**:
+   - Under **Clusters**, click **Connect** &rarr; **Drivers** (Node.js).
+   - Copy the connection URI:
+     ```
+     mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/autoapex?retryWrites=true&w=majority
+     ```
+   - Replace `<username>` and `<password>` with the credentials you just created.
+5. **Add to Vercel / Local `.env`**:
+   - In Vercel: Go to your project &rarr; **Settings** &rarr; **Environment Variables** &rarr; Add:
+     - **Key**: `MONGODB_URI`
+     - **Value**: Your connection string
+   - Locally: Add `MONGODB_URI="..."` to your `.env` file.
+
+#### ✨ Automatic Database Initialization & Seeding:
+When AutoApex connects to your MongoDB Atlas cluster for the first time:
+- It automatically creates all necessary Mongoose collections (`users`, `products`, `orders`, `categories`, `carbrands`, `carmodels`, `coupons`, `reviews`).
+- If empty, it automatically seeds 20+ vehicle catalog parts, demo customer and admin accounts, coupon codes, and vehicle fitment rules into Atlas!
 
 ---
 
